@@ -19,8 +19,6 @@
   }
   .logo { font-size: 12px; color: #8fbc8f; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px; }
   h1 { font-size: 24px; font-weight: 600; color: #fff; margin-bottom: 28px; }
-
-  /* Permission banner */
   #perm-banner {
     width: 100%; max-width: 420px;
     padding: 12px 18px; border-radius: 12px;
@@ -30,8 +28,6 @@
   }
   #perm-banner.granted { background: rgba(46,125,50,0.35); color: #81c784; }
   #perm-banner.denied  { background: rgba(198,40,40,0.25); color: #ef9a9a; }
-
-  /* Mic button */
   #mic-btn {
     width: 160px; height: 160px;
     border-radius: 50%;
@@ -57,20 +53,17 @@
     70%  { box-shadow: 0 0 0 26px rgba(198,40,40,0); }
     100% { box-shadow: 0 0 0 0 rgba(198,40,40,0); }
   }
-
   #mic-label {
     font-size: 12px; letter-spacing: 2px; text-transform: uppercase;
     color: #555; min-height: 18px; margin-bottom: 16px;
   }
   #mic-label.active { color: #ef5350; font-weight: 700; animation: blink 0.8s step-start infinite; }
   @keyframes blink { 50% { opacity: 0; } }
-
   #status {
     font-size: 15px; color: #888;
     margin-bottom: 20px; min-height: 22px;
     max-width: 380px; line-height: 1.5;
   }
-
   #transcript {
     background: rgba(255,255,255,0.06);
     border-radius: 12px; padding: 12px 16px;
@@ -78,7 +71,6 @@
     width: 100%; max-width: 420px;
     margin-bottom: 14px; display: none;
   }
-
   #answer {
     background: rgba(46,125,50,0.2);
     border: 1px solid #388e3c;
@@ -87,7 +79,6 @@
     width: 100%; max-width: 420px;
     text-align: left; display: none; margin-bottom: 14px;
   }
-
   #replay-btn {
     display: none;
     background: none; border: 1px solid #3a3a3a;
@@ -95,7 +86,6 @@
     padding: 7px 18px; border-radius: 20px;
     cursor: pointer; margin-bottom: 32px;
   }
-
   .hint { font-size: 12px; color: #3a5a3a; line-height: 2.2; margin-top: 8px; }
   .hint em { color: #4d7a4d; font-style: italic; }
 </style>
@@ -123,20 +113,18 @@
 </p>
 
 <script>
-  // ── Backend URL (Apps Script) ──────────────────────────────
   var BACKEND_URL = 'https://script.google.com/a/macros/kentcountryside.com/s/AKfycbzk_5kqt37Q-XNhjSgIGRjRT_va9m_grMExswfiEDybaC8K0-laDVpwEN75gxx1-V7I/exec';
-  // ──────────────────────────────────────────────────────────
 
-  var micBtn      = document.getElementById('mic-btn');
-  var micLabel    = document.getElementById('mic-label');
-  var permBanner  = document.getElementById('perm-banner');
-  var statusEl    = document.getElementById('status');
-  var transcriptEl= document.getElementById('transcript');
-  var answerEl    = document.getElementById('answer');
-  var replayBtn   = document.getElementById('replay-btn');
-  var lastAnswer  = '';
-  var recognition = null;
-  var micReady    = false;
+  var micBtn       = document.getElementById('mic-btn');
+  var micLabel     = document.getElementById('mic-label');
+  var permBanner   = document.getElementById('perm-banner');
+  var statusEl     = document.getElementById('status');
+  var transcriptEl = document.getElementById('transcript');
+  var answerEl     = document.getElementById('answer');
+  var replayBtn    = document.getElementById('replay-btn');
+  var lastAnswer   = '';
+  var recognition  = null;
+  var micReady     = false;
 
   // Request mic permission on page load
   window.addEventListener('load', function() {
@@ -157,17 +145,11 @@
   });
 
   micBtn.addEventListener('click', function() {
-    if (!micReady) {
-      setStatus('Microphone not allowed yet. See instructions above.');
-      return;
-    }
+    if (!micReady) { setStatus('Microphone not allowed yet. See instructions above.'); return; }
     if (recognition) { try { recognition.stop(); } catch(e) {} }
 
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) {
-      setStatus('Speech recognition not available. Use Chrome on Android.');
-      return;
-    }
+    if (!SR) { setStatus('Speech recognition not available. Use Chrome on Android.'); return; }
 
     recognition = new SR();
     recognition.lang = 'en-US';
@@ -201,7 +183,7 @@
     recognition.onerror = function(event) {
       resetMic();
       if (event.error === 'not-allowed') {
-        permBanner.textContent = '⚠ Mic blocked. Allow microphone access in Chrome site settings.';
+        permBanner.textContent = '⚠ Mic blocked. Allow microphone in Chrome site settings.';
         permBanner.className = 'denied';
         micReady = false;
         micBtn.disabled = true;
@@ -222,11 +204,16 @@
     recognition.start();
   });
 
+  // JSONP — bypasses CORS entirely
   function askInventory(query) {
-    var url = BACKEND_URL + '?query=' + encodeURIComponent(query);
-    fetch(url)
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
+    var callbackName = 'kcn_cb_' + Date.now();
+    var script = document.createElement('script');
+    var timeout;
+
+    window[callbackName] = function(data) {
+      clearTimeout(timeout);
+      document.body.removeChild(script);
+      delete window[callbackName];
       lastAnswer = data.answer || 'Sorry, no answer available.';
       answerEl.textContent = lastAnswer;
       answerEl.style.display = 'block';
@@ -234,11 +221,23 @@
       setStatus('Tap mic to ask another question');
       resetMic();
       speakAnswer();
-    })
-    .catch(function() {
+    };
+
+    timeout = setTimeout(function() {
+      if (document.body.contains(script)) document.body.removeChild(script);
+      delete window[callbackName];
+      setStatus('Request timed out — check your connection and try again.');
+      resetMic();
+    }, 30000);
+
+    script.src = BACKEND_URL + '?query=' + encodeURIComponent(query) + '&callback=' + callbackName;
+    script.onerror = function() {
+      clearTimeout(timeout);
+      delete window[callbackName];
       setStatus('Connection error — check internet and try again.');
       resetMic();
-    });
+    };
+    document.body.appendChild(script);
   }
 
   function speakAnswer() {
