@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>KCN Inventory Assistant</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #1a2e1a;
+    color: #f0f0f0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 36px 20px;
+    text-align: center;
+  }
+  .logo { font-size: 12px; color: #8fbc8f; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 6px; }
+  h1 { font-size: 24px; font-weight: 600; color: #fff; margin-bottom: 28px; }
+
+  /* Permission banner */
+  #perm-banner {
+    width: 100%; max-width: 420px;
+    padding: 12px 18px; border-radius: 12px;
+    font-size: 14px; margin-bottom: 28px;
+    background: rgba(255,255,255,0.07); color: #999;
+    line-height: 1.5;
+  }
+  #perm-banner.granted { background: rgba(46,125,50,0.35); color: #81c784; }
+  #perm-banner.denied  { background: rgba(198,40,40,0.25); color: #ef9a9a; }
+
+  /* Mic button */
+  #mic-btn {
+    width: 160px; height: 160px;
+    border-radius: 50%;
+    border: none;
+    background: #2e7d32;
+    color: white;
+    font-size: 66px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 18px;
+    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s;
+  }
+  #mic-btn:disabled { background: #333; opacity: 0.5; cursor: not-allowed; }
+  #mic-btn.listening {
+    background: #c62828;
+    animation: ripple 0.9s ease-out infinite;
+  }
+  #mic-btn.thinking { background: #e65100; }
+  @keyframes ripple {
+    0%   { box-shadow: 0 0 0 0 rgba(198,40,40,0.6); }
+    70%  { box-shadow: 0 0 0 26px rgba(198,40,40,0); }
+    100% { box-shadow: 0 0 0 0 rgba(198,40,40,0); }
+  }
+
+  #mic-label {
+    font-size: 12px; letter-spacing: 2px; text-transform: uppercase;
+    color: #555; min-height: 18px; margin-bottom: 16px;
+  }
+  #mic-label.active { color: #ef5350; font-weight: 700; animation: blink 0.8s step-start infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  #status {
+    font-size: 15px; color: #888;
+    margin-bottom: 20px; min-height: 22px;
+    max-width: 380px; line-height: 1.5;
+  }
+
+  #transcript {
+    background: rgba(255,255,255,0.06);
+    border-radius: 12px; padding: 12px 16px;
+    font-size: 15px; color: #bbb; font-style: italic;
+    width: 100%; max-width: 420px;
+    margin-bottom: 14px; display: none;
+  }
+
+  #answer {
+    background: rgba(46,125,50,0.2);
+    border: 1px solid #388e3c;
+    border-radius: 12px; padding: 18px 20px;
+    font-size: 17px; line-height: 1.6;
+    width: 100%; max-width: 420px;
+    text-align: left; display: none; margin-bottom: 14px;
+  }
+
+  #replay-btn {
+    display: none;
+    background: none; border: 1px solid #3a3a3a;
+    color: #666; font-size: 13px;
+    padding: 7px 18px; border-radius: 20px;
+    cursor: pointer; margin-bottom: 32px;
+  }
+
+  .hint { font-size: 12px; color: #3a5a3a; line-height: 2.2; margin-top: 8px; }
+  .hint em { color: #4d7a4d; font-style: italic; }
+</style>
+</head>
+<body>
+
+<div class="logo">Kent Countryside Nursery</div>
+<h1>📦 Inventory Assistant</h1>
+
+<div id="perm-banner">Requesting microphone access...</div>
+
+<div id="mic-label">&nbsp;</div>
+<button id="mic-btn" disabled>🎤</button>
+
+<div id="status">Waiting for microphone permission...</div>
+<div id="transcript"></div>
+<div id="answer"></div>
+<button id="replay-btn" onclick="speakAnswer()">🔊 Hear answer again</button>
+
+<p class="hint">
+  <em>"How many 3-gallon Hydrangeas do we have?"</em><br>
+  <em>"Is Blue Point Juniper in stock?"</em><br>
+  <em>"What sizes of Knockout Rose are available?"</em><br>
+  <em>"What is the price of ornamental grasses?"</em>
+</p>
+
+<script>
+  // ── Backend URL (Apps Script) ──────────────────────────────
+  var BACKEND_URL = 'https://script.google.com/a/macros/kentcountryside.com/s/AKfycbzk_5kqt37Q-XNhjSgIGRjRT_va9m_grMExswfiEDybaC8K0-laDVpwEN75gxx1-V7I/exec';
+  // ──────────────────────────────────────────────────────────
+
+  var micBtn      = document.getElementById('mic-btn');
+  var micLabel    = document.getElementById('mic-label');
+  var permBanner  = document.getElementById('perm-banner');
+  var statusEl    = document.getElementById('status');
+  var transcriptEl= document.getElementById('transcript');
+  var answerEl    = document.getElementById('answer');
+  var replayBtn   = document.getElementById('replay-btn');
+  var lastAnswer  = '';
+  var recognition = null;
+  var micReady    = false;
+
+  // Request mic permission on page load
+  window.addEventListener('load', function() {
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(function(stream) {
+        stream.getTracks().forEach(function(t) { t.stop(); });
+        micReady = true;
+        permBanner.textContent = '✓ Microphone ready — tap to ask a question';
+        permBanner.className = 'granted';
+        micBtn.disabled = false;
+        setStatus('Tap the mic and ask about any product');
+      })
+      .catch(function() {
+        permBanner.textContent = '⚠ Microphone blocked. In Chrome tap ⋮ → Settings → Site Settings → Microphone → Allow this site';
+        permBanner.className = 'denied';
+        setStatus('Mic permission required to use voice.');
+      });
+  });
+
+  micBtn.addEventListener('click', function() {
+    if (!micReady) {
+      setStatus('Microphone not allowed yet. See instructions above.');
+      return;
+    }
+    if (recognition) { try { recognition.stop(); } catch(e) {} }
+
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      setStatus('Speech recognition not available. Use Chrome on Android.');
+      return;
+    }
+
+    recognition = new SR();
+    recognition.lang = 'en-US';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = function() {
+      micBtn.className = 'listening';
+      micBtn.innerHTML = '🔴';
+      micLabel.textContent = '● LISTENING';
+      micLabel.className = 'active';
+      setStatus('Speak your question now...');
+      transcriptEl.style.display = 'none';
+      answerEl.style.display = 'none';
+      replayBtn.style.display = 'none';
+    };
+
+    recognition.onresult = function(event) {
+      var q = event.results[0][0].transcript;
+      micLabel.textContent = '';
+      micLabel.className = '';
+      transcriptEl.textContent = '\u201c' + q + '\u201d';
+      transcriptEl.style.display = 'block';
+      micBtn.className = 'thinking';
+      micBtn.innerHTML = '⏳';
+      micBtn.disabled = true;
+      setStatus('Looking that up...');
+      askInventory(q);
+    };
+
+    recognition.onerror = function(event) {
+      resetMic();
+      if (event.error === 'not-allowed') {
+        permBanner.textContent = '⚠ Mic blocked. Allow microphone access in Chrome site settings.';
+        permBanner.className = 'denied';
+        micReady = false;
+        micBtn.disabled = true;
+        setStatus('Microphone permission denied.');
+      } else if (event.error === 'no-speech') {
+        setStatus('Nothing heard — tap mic and try again.');
+      } else if (event.error === 'network') {
+        setStatus('Speech service network error. Check your connection.');
+      } else {
+        setStatus('Mic error (' + event.error + '). Tap to try again.');
+      }
+    };
+
+    recognition.onend = function() {
+      if (micBtn.className === 'listening') resetMic();
+    };
+
+    recognition.start();
+  });
+
+  function askInventory(query) {
+    fetch(BACKEND_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: query })
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      lastAnswer = data.answer || 'Sorry, no answer available.';
+      answerEl.textContent = lastAnswer;
+      answerEl.style.display = 'block';
+      replayBtn.style.display = 'inline-block';
+      setStatus('Tap mic to ask another question');
+      resetMic();
+      speakAnswer();
+    })
+    .catch(function() {
+      setStatus('Connection error — check internet and try again.');
+      resetMic();
+    });
+  }
+
+  function speakAnswer() {
+    if ('speechSynthesis' in window && lastAnswer) {
+      window.speechSynthesis.cancel();
+      var u = new SpeechSynthesisUtterance(lastAnswer);
+      u.lang = 'en-US';
+      u.rate = 0.92;
+      window.speechSynthesis.speak(u);
+    }
+  }
+
+  function resetMic() {
+    micBtn.className = '';
+    micBtn.innerHTML = '🎤';
+    micBtn.disabled = false;
+    micLabel.textContent = '';
+    micLabel.className = '';
+  }
+
+  function setStatus(msg) { statusEl.textContent = msg; }
+</script>
+</body>
+</html>
