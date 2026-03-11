@@ -225,7 +225,8 @@
   function askInventory(query) {
     fetch(BACKEND_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      redirect: 'follow',
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({ query: query })
     })
     .then(function(r) { return r.json(); })
