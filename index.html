@@ -223,12 +223,8 @@
   });
 
   function askInventory(query) {
-    fetch(BACKEND_URL, {
-      method: 'POST',
-      redirect: 'follow',
-      headers: { 'Content-Type': 'text/plain' },
-      body: JSON.stringify({ query: query })
-    })
+    var url = BACKEND_URL + '?query=' + encodeURIComponent(query);
+    fetch(url)
     .then(function(r) { return r.json(); })
     .then(function(data) {
       lastAnswer = data.answer || 'Sorry, no answer available.';
